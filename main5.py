@@ -1898,50 +1898,8 @@ Notes Path: {file_info.notes_path if file_info.has_notes else 'Not found'}
 
             processor = OpenRouterProcessor(config=note_config)
 
-            transcript_path = Path(task.transcript_path)
-            notes_filename = f"{transcript_path.stem}_notes.md"
-            notes_path = notes_dir / notes_filename
+            # Notes processing delegated to process_notes_only
 
-            notes_result = processor.process_transcript_file(
-                transcript_path=task.transcript_path,
-                output_path=str(notes_path),
-                subject=task.subject
-            )
-
-            if notes_result['success'] and self.config.remove_thinking_tags:
-                try:
-                    with open(notes_path, 'r', encoding='utf-8') as f:
-                        content = f.read()
-
-                    cleaned_content = self.remove_thinking_tags(content)
-
-                    with open(notes_path, 'w', encoding='utf-8') as f:
-                        f.write(cleaned_content)
-
-                    self.log_activity(f"Removed thinking tags from: {Path(task.filepath).name}")
-                except Exception as e:
-                    logging.error(f"Error removing thinking tags: {e}")
-
-            if notes_result['success']:
-                task.notes_path = str(notes_path)
-                task.tokens_used = notes_result.get('tokens_used', 0)
-                task.status = "completed"
-                self.log_activity(f"Notes generation completed: {Path(task.filepath).name} ({task.tokens_used} tokens)")
-
-                if (self.config.word_auto_update and self.word_manager and
-                    task.status == "completed" and task.notes_path):
-                    try:
-                        self.word_manager.check_new_markdown_file(task.notes_path, task.subject)
-                        self.log_activity(f"Word document updated for {task.subject}")
-
-                        if self.config.auto_apply_colors:
-                            self.apply_color_to_word_document(task.subject)
-                    except Exception as e:
-                        logging.error(f"Error updating Word document: {e}")
-            else:
-                task.status = "error"
-                task.error_message = notes_result.get('error', 'Unknown notes processing error')
-                self.log_activity(f"Notes processing failed: {Path(task.filepath).name} - {task.error_message}")
 
         except Exception as e:
             task.status = "error"
