@@ -134,9 +134,13 @@ class GeminiProcessor:
 
             self.logger.info(f"Processing transcript for subject: {subject} with Gemini")
             
-            # Prepare the prompt
-            system_prompt = self._get_system_prompt(subject)
-            full_prompt = f"{system_prompt}\n\n{self.config.pre_prompt}\n\nTranscript:\n{transcript_text}"
+            # Prepare the prompt using pre_prompt from config
+            # We don't use a hardcoded system prompt to avoid duplication with pre_prompt.txt
+            full_prompt = f"{self.config.pre_prompt}\n\nTranscript:\n{transcript_text}"
+            
+            if subject and not self.config.pre_prompt:
+                 # Fallback if pre_prompt is missing but we have subject
+                 full_prompt = f"Please create detailed notes for this {subject} class transcript:\n\n{transcript_text}"
             
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.config.model}:generateContent?key={self.api_key}"
             
@@ -305,44 +309,7 @@ class GeminiProcessor:
                 "error": f"File processing error: {str(e)}"
             }
     
-    def _get_system_prompt(self, subject: str = "") -> str:
-        """Get system prompt for note processing."""
-        base_prompt = """You are an expert note-taking assistant for students. Your task is to convert lecture transcripts into well-structured, comprehensive study notes.
-
-Please transform the provided transcript into organized notes with these characteristics:
-- Create clear headings and subheadings using markdown format
-- Extract key concepts, definitions, and important facts
-- Organize information logically and hierarchically
-- Use bullet points and numbered lists where appropriate
-- Highlight important terms and concepts with **bold** or *italics*
-- Include examples and explanations provided in the lecture
-- Maintain academic tone and accuracy
-- Format for easy studying and review
-- Add a brief summary at the end
-
-Structure your response as:
-# [Lecture Topic/Title]
-
-## Key Concepts
-[Main concepts covered]
-
-## Detailed Notes
-[Organized content with proper hierarchy]
-
-## Important Definitions
-[Key terms and their definitions]
-
-## Examples
-[Any examples mentioned in the lecture]
-
-## Summary
-[Brief overview of the main points]"""
-
-        if subject:
-            subject_addition = f"\n\nThis transcript is from a {subject} class, so focus on concepts and terminology relevant to that subject."
-            return base_prompt + subject_addition
-        
-        return base_prompt
+    
     
     def _format_notes_output(self, notes: str, subject: str, filename: str, tokens_used: int, model: str) -> str:
         """Format the notes output with metadata."""
