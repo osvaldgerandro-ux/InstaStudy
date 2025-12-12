@@ -2350,6 +2350,117 @@ Notes Path: {file_info.notes_path if file_info.has_notes else 'Not found'}
             self.log_activity(f"Error processing task {Path(task.filepath).name}: {e}")
             logging.error(f"Processing error for {task.filepath}: {e}")
 
+    def get_task_progress(self, task):
+        """Get task progress description."""
+        if task.status == "completed":
+            if task.reprocess_type:
+                return f"✓ Reprocessed ({task.reprocess_type})"
+            return "✓ Complete - Notes generated"
+        elif task.status == "transcript_only":
+            return "📝 Has transcript, needs notes"
+        elif task.status == "queued_notes":
+            return "⏳ Queued for notes generation"
+        elif task.status == "queued_transcript":
+            return "⏳ Queued for transcript generation"
+        elif task.status == "error":
+            return f"✗ Error: {task.error_message[:40]}..."
+        elif task.status == "transcribing":
+            return "🎵 Transcribing audio..."
+        elif task.status == "processing_notes":
+            return "📝 Generating notes..."
+        elif task.status == "queued":
+            return "⏳ Queued for processing"
+        elif task.status == "pending":
+            return "⏳ Waiting to start"
+        else:
+            return f"Unknown: {task.status}"
+
+    def open_file_in_editor(self, filepath):
+        """Open file in system default editor."""
+        import subprocess
+        import platform
+
+        try:
+            if platform.system() == "Windows":
+                os.startfile(filepath)
+            elif platform.system() == "Darwin":
+                subprocess.run(["open", filepath])
+            else:
+                subprocess.run(["xdg-open", filepath])
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not open file: {e}")
+
+    def refresh_reprocessing_display(self):
+        """Refresh the reprocessing files display."""
+        for item in self.reprocess_tree.get_children():
+            self.reprocess_tree.delete(item)
+
+        for file_info in sorted(self.reprocessing_files.values(), key=lambda f: f.filename):
+            status_parts = []
+            if file_info.has_transcript:
+                status_parts.append("Has transcript")
+            if file_info.has_notes:
+                status_parts.append("Has notes")
+
+            if not status_parts:
+                status = "Not processed"
+            else:
+                status = ", ".join(status_parts)
+
+            size_mb = file_info.file_size / (1024 * 1024)
+            size_str = f"{size_mb:.1f} MB" if size_mb > 1 else f"{file_info.file_size / 1024:.1f} KB"
+
+            select_indicator = "☑" if file_info.selected else "☐"
+            transcript_indicator = "✓" if file_info.has_transcript else "✗"
+            notes_indicator = "✓" if file_info.has_notes else "✗"
+
+            self.reprocess_tree.insert("", tk.END, values=(
+                select_indicator,
+                file_info.filename,
+                file_info.subject,
+                status,
+                size_str,
+                file_info.modified_date,
+                transcript_indicator,
+                notes_indicator
+            ), tags=(file_info.filepath,))
+
+    def run(self):
+        """Run the application."""
+        try:
+            self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+            self.root.mainloop()
+        except KeyboardInterrupt:
+            self.shutdown()
+
+    def on_closing(self):
+        """Handle application closing."""
+        self.shutdown()
+        self.root.destroy()
+
+    def shutdown(self):
+        """Shutdown the application."""
+        logging.info("Shutting down application...")
+
+        self.stop_file_monitoring()
+
+        if self.processing_thread and self.processing_thread.is_alive():
+            self.processing_thread.stop()
+            self.processing_thread.join(timeout=5)
+
+        self.save_config()
+
+
+def main():
+    """Main entry point."""
+    try:
+        app = SchoolNoteApp()
+        app.run()
+    except Exception as e:
+        logging.error(f"Application error: {e}")
+        print(f"Error: {e}")
+        sys.exit(1)
+
+
 if __name__ == "__main__":
-    app = SchoolNoteApp()
-    app.root.mainloop()
+    main()
