@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# App runtime / user data
+app_config.json
+*_api_key.txt
+pre_prompt.txt
+note_app.log
+
+# Generated outputs
+Appunti Completi/
+**/transcripts/
+**/notes/
+*_combined_notes.docx

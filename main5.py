@@ -14,7 +14,7 @@ from typing import Dict, List, Optional, Set
 from datetime import datetime
 import queue
 import logging
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, fields
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, scrolledtext
 from watchdog.observers import Observer
@@ -251,14 +251,62 @@ Transcript to process:"""
 
     def load_config(self):
         """Load configuration from file."""
-        if self.config_file.exists():
-            try:
-                with open(self.config_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    self.config = AppConfig(**data)
-                logging.info("Configuration loaded successfully")
-            except Exception as e:
-                logging.error(f"Error loading configuration: {e}")
+        if not self.config_file.exists():
+            return
+
+        try:
+            with open(self.config_file, 'r', encoding='utf-8') as f:
+                raw_data = json.load(f)
+
+            if not isinstance(raw_data, dict):
+                logging.error("Error loading configuration: app_config.json is not a JSON object")
+                return
+
+            data = dict(raw_data)
+
+            # Backward-compatibility migrations
+            if "ai_provider" in data and "provider_mode" not in data:
+                provider = str(data.get("ai_provider", "")).strip().lower()
+                if provider in {"openrouter", "open router", "only openrouter", "only open router"}:
+                    data["provider_mode"] = "Only OpenRouter"
+                elif provider in {"gemini", "only gemini"}:
+                    data["provider_mode"] = "Only Gemini"
+
+            if "model" in data and "openrouter_model" not in data:
+                data["openrouter_model"] = data.get("model")
+            if "temperature" in data and "openrouter_temperature" not in data:
+                data["openrouter_temperature"] = data.get("temperature")
+            if "max_tokens" in data and "openrouter_max_tokens" not in data:
+                data["openrouter_max_tokens"] = data.get("max_tokens")
+
+            if "font_name" in data and "word_font_name" not in data:
+                data["word_font_name"] = data.get("font_name")
+            if "font_size" in data and "word_font_size" not in data:
+                data["word_font_size"] = data.get("font_size")
+            if "heading1_size" in data and "word_heading1_size" not in data:
+                data["word_heading1_size"] = data.get("heading1_size")
+            if "heading2_size" in data and "word_heading2_size" not in data:
+                data["word_heading2_size"] = data.get("heading2_size")
+            if "heading3_size" in data and "word_heading3_size" not in data:
+                data["word_heading3_size"] = data.get("heading3_size")
+            if "line_spacing" in data and "word_line_spacing" not in data:
+                data["word_line_spacing"] = data.get("line_spacing")
+
+            valid_keys = {f.name for f in fields(AppConfig)}
+            filtered = {k: v for k, v in data.items() if k in valid_keys}
+
+            ignored = sorted(set(data.keys()) - valid_keys)
+            if ignored:
+                logging.info(f"Ignoring unknown config keys: {', '.join(ignored)}")
+
+            self.config = AppConfig(**filtered)
+            logging.info("Configuration loaded successfully")
+
+            # Ensure dependent services reflect loaded settings
+            self.init_word_manager()
+
+        except Exception as e:
+            logging.error(f"Error loading configuration: {e}")
 
     def save_config(self):
         """Save configuration to file."""
@@ -367,17 +415,17 @@ Transcript to process:"""
         self.root.title("School Note Taking App")
         self.root.geometry("1200x900")
 
-        notebook = ttk.Notebook(self.root)
-        notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        self.setup_config_tab(notebook)
-        self.setup_api_keys_tab(notebook)
-        self.setup_pre_prompt_tab(notebook)
-        self.setup_monitoring_tab(notebook)
-        self.setup_tasks_tab(notebook)
-        self.setup_reprocessing_tab(notebook)
-        self.setup_word_tab(notebook)
-        self.setup_color_management_tab(notebook)
+        self.setup_config_tab(self.notebook)
+        self.setup_api_keys_tab(self.notebook)
+        self.setup_pre_prompt_tab(self.notebook)
+        self.setup_monitoring_tab(self.notebook)
+        self.setup_tasks_tab(self.notebook)
+        self.setup_reprocessing_tab(self.notebook)
+        self.setup_word_tab(self.notebook)
+        self.setup_color_management_tab(self.notebook)
 
         self.status_var = tk.StringVar()
         self.status_var.set("Ready")
@@ -385,6 +433,37 @@ Transcript to process:"""
         status_bar.pack(side=tk.BOTTOM, fill=tk.X)
 
         self.update_gui()
+
+    def update_gui(self):
+        """Refresh dynamic GUI elements based on current app state."""
+        try:
+            if hasattr(self, "monitor_status_var"):
+                if self.observer and self.observer.is_alive():
+                    self.monitor_status_var.set(f"Monitoring: {self.config.watch_directory}")
+                else:
+                    if self.config.watch_directory:
+                        if os.path.exists(self.config.watch_directory):
+                            self.monitor_status_var.set(f"Not monitoring (directory set: {self.config.watch_directory})")
+                        else:
+                            self.monitor_status_var.set(f"Not monitoring (missing directory: {self.config.watch_directory})")
+                    else:
+                        self.monitor_status_var.set("Not monitoring (no watch directory configured)")
+
+            if hasattr(self, "status_var"):
+                queued = sum(1 for t in self.tasks.values() if str(t.status).startswith("queued"))
+                self.status_var.set(f"Ready • {queued} queued" if queued else "Ready")
+
+            if hasattr(self, "provider_mode_var"):
+                self.on_provider_mode_change(None)
+
+            if hasattr(self, "tasks_tree"):
+                self.refresh_tasks_display()
+
+            if hasattr(self, "selection_count_var"):
+                self.update_selection_count()
+
+        except Exception as e:
+            logging.error(f"Error updating GUI: {e}")
 
     def setup_color_management_tab(self, notebook):
         """Setup color management tab."""
@@ -1362,7 +1441,10 @@ Notes Path: {file_info.notes_path if file_info.has_notes else 'Not found'}
             self.task_queue.put(task)
             self.reprocess_status_var.set(f"Queued {count} files for reprocessing")
 
-        self.root.select_set(self.notebook.index(self.tasks_tree.master.master)) # Switch to tasks tab roughly
+        try:
+            self.notebook.select(self.tasks_tree.master)
+        except Exception:
+            pass
 
     def handle_reprocessing_task(self, task: ProcessingTask):
         """Handle a reprocessing task."""
@@ -1877,10 +1959,12 @@ Notes Path: {file_info.notes_path if file_info.has_notes else 'Not found'}
 
             self.log_activity(f"Started monitoring directory: {self.config.watch_directory}")
             logging.info(f"Started file monitoring: {self.config.watch_directory}")
+            self.update_gui()
 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to start monitoring: {e}")
             logging.error(f"Failed to start monitoring: {e}")
+            self.update_gui()
 
     def stop_file_monitoring(self):
         """Stop file monitoring."""
@@ -1889,6 +1973,8 @@ Notes Path: {file_info.notes_path if file_info.has_notes else 'Not found'}
             self.observer.join()
             self.log_activity("Stopped file monitoring")
             logging.info("Stopped file monitoring")
+
+        self.update_gui()
 
     def handle_new_file(self, filepath):
         """Handle new file detection."""
